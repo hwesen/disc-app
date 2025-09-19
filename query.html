@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>DiSC 測驗紀錄查詢</title>
+  <style>
+    body{font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans TC","PingFang TC",sans-serif;background:#f6f7fb;color:#0f172a;margin:0}
+    .wrap{max-width:1100px;margin:24px auto;padding:0 14px}
+    .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin:12px 0}
+    .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+    input{width: calc(100% - 12px);padding:12px;border:1px solid #e5e7eb;border-radius:8px;margin:6px 0}
+    button{border:1px solid #e5e7eb;border-radius:10px;padding:10px 14px;background:#0ea5e9;color:#fff;cursor:pointer}
+    table{width:100%;border-collapse:collapse}
+    th,td{border-bottom:1px solid #e5e7eb;padding:8px 6px;text-align:left;font-size:14px;vertical-align:top}
+    th{background:#f8fafc;color:#334155;position:sticky;top:0}
+    .muted{color:#64748b}
+    input, button, select, textarea {box-sizing: border-box;}
+    canvas{display:block}
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="card" style="display:flex;justify-content:space-between;align-items:center">
+    <button id="btnBack">← 返回登入頁</button>
+    <span class="muted">管理者後台</span>
+  </div>
+
+  <!-- 查詢區 -->
+  <div id="mainCard" class="card">
+    <h2>測驗紀錄查詢</h2>
+    <div class="grid">
+      <label>姓名<input id="fName" placeholder="關鍵字"></label>
+      <label>部門<input id="fDept" placeholder="關鍵字"></label>
+      <label>起日<input id="fFrom" type="date"></label>
+      <label>訖日<input id="fTo" type="date"></label>
+    </div>
+    <div style="margin-top:10px">
+      <button id="btnSearch">查詢</button>
+      <button id="btnExport">匯出 CSV</button>
+    </div>
+
+    <div class="card" style="margin:12px 0;overflow-x:auto">
+      <table id="tbl">
+        <thead><tr></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p id="meta" class="muted" style="margin-top:8px"></p>
+    </div>
+  </div>
+
+  <!-- 使用者帳號管理 -->
+  <div id="userCard" class="card">
+    <h2>使用者帳號管理</h2>
+    <button id="btnLoadUsers">載入使用者</button>
+    <table id="tblUsers" style="margin-top:10px;width:100%;border-collapse:collapse">
+      <thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Password</th><th>操作</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+</div>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+/* ===== API 基本設定 ===== */
+const API   = 'https://winter-leaf-6bd9.service-hwesen.workers.dev/';  // 走 Proxy
+const TOKEN = 'sadfzklj324@#$%';
+
+/* ===== 登入檢查 ===== */
+const user = JSON.parse(sessionStorage.getItem('user')||'null');
+if(!user || user.role!=='admin'){
+  alert("需要管理者登入才能進入");
+  window.location.href = "login.html";
+}
+
+/* ===== 返回登入頁 ===== */
+btnBack.onclick=()=>{
+  sessionStorage.removeItem('user');
+  window.location.href = "login.html";  // 前端自己的 login.html
+};
+
+/* ===== 查詢功能 ===== */
+const fName=document.getElementById('fName');
+const fDept=document.getElementById('fDept');
+const fFrom=document.getElementById('fFrom');
+const fTo  =document.getElementById('fTo');
+const tbl  =document.getElementById('tbl');
+const meta =document.getElementById('meta');
+
+btnSearch.onclick=load;
+
+async function load(){
+  const params=new URLSearchParams({
+    action:'list',
+    token:TOKEN,
+    name:fName.value.trim(),
+    dept:fDept.value.trim(),
+    dateFrom:fFrom.value||'',
+    dateTo:fTo.value||''
+  });
+  const res=await fetch(`${API}?${params.toString()}`);
+  const j=await res.json().catch(()=>({ok:false,error:'bad_json'}));
+  if(!j.ok){ alert('查詢失敗：'+(j.error||'')); return; }
+  render(j.data||[]);
+}
+
+function render(rows){
+  const thead=tbl.querySelector('thead tr');
+  const tbody=tbl.querySelector('tbody');
+  thead.innerHTML=''; tbody.innerHTML='';
+
+  if(!rows.length){
+    thead.innerHTML='<th>無資料</th>';
+    meta.textContent='';
+    return;
+  }
+
+  const keys=Object.keys(rows[0]);
+  thead.innerHTML=keys.map(k=>`<th>${k}</th>`).join('') + '<th>圖表</th>';
+
+  rows.forEach((r,i)=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=keys.map(k=>`<td>${r[k]??''}</td>`).join('');
+    const td=document.createElement('td');
+    const canvas=document.createElement('canvas');
+    canvas.id=`chart_${i}`;
+    canvas.width=160;
+    canvas.height=120;
+    td.appendChild(canvas);
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+
+    const scores=[Number(r.D)||0, Number(r.I)||0, Number(r.S)||0, Number(r.C)||0];
+    new Chart(canvas.getContext('2d'),{
+      type:'bar',
+      data:{
+        labels:['D','I','S','C'],
+        datasets:[
+          { type:'bar', data:scores,
+            backgroundColor:'rgba(14,165,233,0.4)', borderColor:'#0ea5e9', borderWidth:1 },
+          { type:'line', data:scores,
+            borderColor:'#0ea5e9', backgroundColor:'#0ea5e9',
+            fill:false, tension:0.2, pointRadius:3, borderWidth:2 }
+        ]
+      },
+      options:{
+        responsive:false,
+        plugins:{legend:{display:false}},
+        scales:{ y:{min:0,max:100,ticks:{stepSize:20}} }
+      }
+    });
+  });
+
+  meta.textContent=`共 ${rows.length} 筆`;
+}
+
+btnExport.onclick=()=>{
+  const rows=[...tbl.querySelectorAll('tr')].map(tr=>
+    [...tr.children].map(td=>`"${String(td.textContent).replace(/"/g,'""')}"`).join(',')
+  );
+  const blob=new Blob([rows.join('\n')],{type:'text/csv;charset=utf-8;'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`disc_records_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+};
+
+/* ===== 使用者帳號管理 ===== */
+const tblUsers=document.getElementById('tblUsers').querySelector('tbody');
+btnLoadUsers.onclick=loadUsers;
+
+async function loadUsers(){
+  const params=new URLSearchParams({action:'listUsers',token:TOKEN});
+  const res=await fetch(`${API}?${params.toString()}`);
+  const j=await res.json().catch(()=>({ok:false,error:'bad_json'}));
+  if(!j.ok){ alert('載入失敗：'+(j.error||'')); return; }
+  renderUsers(j.data||[]);
+}
+
+function renderUsers(rows){
+  tblUsers.innerHTML='';
+  rows.forEach(u=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+      <td>${u.Username}</td>
+      <td>${u.Name||''}</td>
+      <td>${u.Role||''}</td>
+      <td>${u.Role==='user' ? `<input type="text" value="${u.Password||''}" style="width:120px">` : '---'}</td>
+      <td>${u.Role==='user' ? `<button class="btnSave">儲存</button>` : ''}</td>
+    `;
+    if(u.Role==='user'){
+      const btn=tr.querySelector('.btnSave');
+      const inp=tr.querySelector('input');
+      btn.onclick=async()=>{
+        const pw=inp.value.trim();
+        if(!pw){ alert('密碼不可空白'); return; }
+        const res=await fetch(`${API}?action=updateUser&token=${encodeURIComponent(TOKEN)}`,{
+          method:'POST',
+          headers:{'Content-Type':'application/json'}, // ✅ 改成 JSON
+          body:JSON.stringify({username:u.Username,password:pw})
+        });
+        const j=await res.json().catch(()=>({ok:false}));
+        if(j.ok){ alert('已更新'); } else { alert('更新失敗'); }
+      };
+    }
+    tblUsers.appendChild(tr);
+  });
+}
+
+// 預設載入一次
+load();
+loadUsers();
+</script>
+</body>
+</html>
