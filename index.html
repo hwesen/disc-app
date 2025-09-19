@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>DiSC 測驗</title>
+  <style>
+    body{font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans TC","PingFang TC",sans-serif;background:#f6f7fb;color:#0f172a;margin:0}
+    .wrap{max-width:700px;margin:28px auto;padding:0 14px}
+    .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin:12px 0}
+    button{border:1px solid #e5e7eb;border-radius:10px;padding:10px 14px;background:#0ea5e9;color:#fff;cursor:pointer}
+    .q{padding:12px;border:1px solid #e5e7eb;border-radius:10px;margin:12px 0;background:#fff}
+    .q-table{width:100%;border-collapse:collapse}
+    .q-table th,.q-table td{padding:6px 4px;text-align:center}
+    .col-title{text-align:left;width:60%}
+    .progress{height:10px;border-radius:999px;background:#eee;overflow:hidden;margin-bottom:10px}
+    .progress b{display:block;height:100%;background:#0ea5e9;width:0}
+    .muted{color:#64748b}
+    .nav-btns{display:flex;justify-content:space-between;margin-top:12px}
+    canvas{margin-top:10px}
+    input:invalid {border-color:#ef4444;box-shadow:0 0 0 2px rgba(239,68,68,0.3)}
+    .info-input{width:100%;padding:14px 16px;font-size:16px;border:1px solid #d1d5db;border-radius:10px;margin:8px 0;transition:all .2s;box-sizing:border-box}
+    .info-input:focus{outline:none;border-color:#0ea5e9;box-shadow:0 0 0 3px rgba(14,165,233,0.2)}
+    .chk-wrap input[type=radio]{display:none}
+    .chkbox{display:inline-block;width:28px;height:28px;border:2px solid #334155;border-radius:6px;background:#fff;cursor:pointer;vertical-align:middle}
+    .chk-wrap input[type=radio]:checked + .chkbox{background:#0ea5e9;border-color:#0ea5e9;box-shadow:inset 0 0 0 4px #fff}
+    .hidden{display:none}
+    .choice-col{width:70px}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+    <button id="btnLogout">登出</button>
+  </div>
+
+  <!-- 基本資料 -->
+  <form id="userInfoForm" class="card">
+    <h2>填寫基本資料</h2>
+    <label>公司名稱 <input id="infoCompany" class="info-input" required></label>
+    <input id="infoDept" type="hidden" value="">
+    <label>職務 <input id="infoTitle" class="info-input" required></label>
+    <label>姓名 <input id="infoName" class="info-input" required></label>
+    <label>聯絡電話 <input id="infoPhone" class="info-input" type="tel" required></label>
+    <button type="submit">開始測驗</button>
+  </form>
+
+  <!-- 問卷 -->
+  <form id="quizForm" class="card hidden">
+    <h2>DiSC 測驗（24 題）</h2>
+    <div class="progress"><b id="prog"></b></div>
+    <div class="muted" id="progTxt">第 1 / 24 題</div>
+    <div id="qWrap"></div>
+    <div class="nav-btns">
+      <button type="button" id="btnPrev">⬅ 上一題</button>
+      <button type="button" id="btnNext">下一題 ➡</button>
+    </div>
+    <p id="err" class="muted"></p>
+  </form>
+
+  <!-- 結果 -->
+  <section id="resultSec" class="card hidden">
+    <h2>測驗結果</h2>
+    <div style="max-width:500px">
+      <canvas id="discChart"></canvas>
+    </div>
+    <p><b>D：</b><span id="resD">–</span></p>
+    <p><b>I：</b><span id="resI">–</span></p>
+    <p><b>S：</b><span id="resS">–</span></p>
+    <p><b>C：</b><span id="resC">–</span></p>
+    <p class="muted" id="saveMsg"></p>
+    <button id="btnRestart">重新測驗 🔄</button>
+  </section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+/* ====== API ====== */
+const API   = 'https://winter-leaf-6bd9.service-hwesen.workers.dev/'; // 走 Proxy
+const TOKEN = 'sadfzklj324@#$%';
+
+/* ====== 登入檢查 ====== */
+const user = JSON.parse(sessionStorage.getItem('user')||'null');
+if(!user || user.role!=='user'){
+  alert("請先以使用者身份登入");
+  window.location.href = 'login.html';
+}
+
+/* ====== 題庫 ====== */
+const questions = [
+  {id:1, opts:{A:"喜歡快速做決定", B:"容易與人建立關係", C:"樂於維持穩定環境", D:"注重規則與細節"}},
+  {id:2, opts:{A:"勇於承擔責任", B:"表達熱情且具說服力", C:"重視和諧氣氛", D:"謹慎分析後才行動"}},
+  // ...（題庫省略，保留你原本的 24 題）
+  {id:24, opts:{A:"勇於突破", B:"人際互動多", C:"樂於配合", D:"守規矩"}}
+];
+const mapping={}; for(let i=1;i<=24;i++){ mapping[i]={A:"D",B:"I",C:"S",D:"C"}; }
+function shuffle(arr){ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; } return arr; }
+
+/* ====== 狀態 ====== */
+let currentIndex=0;
+const answers={most:Array(questions.length).fill(null),least:Array(questions.length).fill(null)};
+const shuffledQuestions = shuffle([...questions]);
+
+/* ====== DOM ====== */
+const qWrap=document.getElementById('qWrap');
+const prog=document.getElementById('prog');
+const progTxt=document.getElementById('progTxt');
+const btnPrev=document.getElementById('btnPrev');
+const btnNext=document.getElementById('btnNext');
+const err=document.getElementById('err');
+
+/* ====== 渲染題目 ====== */
+function renderQuestion(){
+  const q=shuffledQuestions[currentIndex];
+  const opts=shuffle(Object.entries(q.opts));
+  qWrap.innerHTML=`<div class="q">
+      <div><b>第 ${currentIndex+1} 題</b></div>
+      <table class="q-table">
+        <thead><tr><th class="col-title"></th><th class="choice-col">最符合</th><th class="choice-col">最不符合</th></tr></thead>
+        <tbody>
+          ${opts.map(([key,opt])=>`
+            <tr>
+              <td class="col-title">${opt}</td>
+              <td><label class="chk-wrap"><input type="radio" name="most" value="${key}" ${answers.most[currentIndex]===key?"checked":""}><span class="chkbox"></span></label></td>
+              <td><label class="chk-wrap"><input type="radio" name="least" value="${key}" ${answers.least[currentIndex]===key?"checked":""}><span class="chkbox"></span></label></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+  prog.style.width=((currentIndex)/shuffledQuestions.length*100)+'%';
+  progTxt.textContent=`第 ${currentIndex+1} / ${shuffledQuestions.length} 題`;
+  btnPrev.disabled=(currentIndex===0);
+  btnNext.textContent=(currentIndex===shuffledQuestions.length-1)?"送出 ✅":"下一題 ➡";
+}
+
+/* ====== 基本資料 ====== */
+document.getElementById('userInfoForm').onsubmit=(e)=>{
+  e.preventDefault();
+  const company=document.getElementById('infoCompany').value.trim();
+  const dept=document.getElementById('infoDept').value.trim();
+  const title=document.getElementById('infoTitle').value.trim();
+  const name=document.getElementById('infoName').value.trim();
+  const phone=document.getElementById('infoPhone').value.trim();
+  if(!company || !title || !name || !phone){ alert("請完整填寫基本資料"); return; }
+  user.meta={org:company,dept:dept,title:title,name:name,phone:String(phone)};
+  document.getElementById('userInfoForm').classList.add('hidden');
+  document.getElementById('quizForm').classList.remove('hidden');
+  renderQuestion();
+};
+
+/* ====== 答題控制 ====== */
+function saveCurrentAnswer(){ const most=document.querySelector('input[name="most"]:checked'); const least=document.querySelector('input[name="least"]:checked'); if(most) answers.most[currentIndex]=most.value; if(least) answers.least[currentIndex]=least.value; }
+btnPrev.onclick=()=>{ saveCurrentAnswer(); if(currentIndex>0){ currentIndex--; renderQuestion(); } };
+btnNext.onclick=()=>{ const most=document.querySelector('input[name="most"]:checked'); const least=document.querySelector('input[name="least"]:checked'); if(!most || !least){ err.textContent="請選擇最符合與最不符合"; return; } if(most.value===least.value){ err.textContent="同一選項不可同時最符合與最不符合"; return; } err.textContent=""; saveCurrentAnswer(); if(currentIndex===shuffledQuestions.length-1){ submitQuiz(); } else { currentIndex++; renderQuestion(); } };
+
+/* ====== 計分 ====== */
+function scoreDISC(ans){
+  const raw={D:0,I:0,S:0,C:0};
+  ans.most.forEach((opt,i)=>{ if(opt) raw[mapping[shuffledQuestions[i].id][opt]]+=2; });
+  ans.least.forEach((opt,i)=>{ if(opt) raw[mapping[shuffledQuestions[i].id][opt]]-=1; });
+  const vals=Object.values(raw);
+  const max=Math.max(...vals), min=Math.min(...vals);
+  const scores={};
+  for(const d of ['D','I','S','C']){
+    scores[d]=(max===min)?50:Math.round(20 + 60*(raw[d]-min)/(max-min));
+  }
+  return scores;
+}
+
+/* ====== 繪圖 ====== */
+let chartInstance=null;
+function drawChart(scores){
+  const ctx=document.getElementById('discChart').getContext('2d');
+  if(chartInstance){ chartInstance.destroy(); }
+  chartInstance=new Chart(ctx,{
+    type:'bar',
+    data:{
+      labels:['D','I','S','C'],
+      datasets:[
+        {type:'bar', data:[scores.D,scores.I,scores.S,scores.C], backgroundColor:'rgba(14,165,233,0.4)', borderColor:'#0ea5e9', borderWidth:1},
+        {type:'line', data:[scores.D,scores.I,scores.S,scores.C], borderColor:'#0ea5e9', backgroundColor:'#0ea5e9', fill:false, tension:0.2, pointRadius:5, borderWidth:2}
+      ]
+    },
+    options:{responsive:true, plugins:{legend:{display:false}}, scales:{y:{min:0,max:100,ticks:{stepSize:20}}}}
+  });
+}
+
+/* ====== 送出 ====== */
+let submitting=false;
+async function submitQuiz(){
+  if(submitting) return; submitting=true;
+  const scores=scoreDISC(answers);
+  resD.textContent=scores.D; resI.textContent=scores.I; resS.textContent=scores.S; resC.textContent=scores.C;
+  resultSec.classList.remove('hidden'); drawChart(scores);
+  saveMsg.textContent='寫入中…';
+  try{
+    const body={meta:user.meta,scores};
+    const res=await fetch(`${API}?action=save&token=${encodeURIComponent(TOKEN)}`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body)
+    });
+    const j=await res.json();
+    saveMsg.textContent=j.ok?'✅ 測驗完成已存檔':'❌ 寫入失敗';
+  }catch(err){ saveMsg.textContent='❌ 連線錯誤'; }
+  window.scrollTo(0,resultSec.offsetTop-12);
+}
+
+/* ====== 重新測驗 ====== */
+document.getElementById('btnRestart').onclick=()=>{
+  currentIndex=0;
+  for(let i=0;i<questions.length;i++){ answers.most[i]=null; answers.least[i]=null; }
+  resultSec.classList.add('hidden');
+  renderQuestion();
+  window.scrollTo(0,0);
+};
+
+/* ====== 登出 ====== */
+document.getElementById('btnLogout').onclick=()=>{
+  sessionStorage.removeItem('user');
+  window.location.href = 'login.html';
+};
+</script>
+</body>
+</html>
