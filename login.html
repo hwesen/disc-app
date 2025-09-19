@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>DISC 測驗登入</title>
+  <style>
+    body{font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans TC","PingFang TC",sans-serif;background:#f6f7fb;color:#0f172a;margin:0}
+    .wrap{max-width:400px;margin:80px auto;padding:0 14px}
+    .card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:24px}
+    input{width:calc(100% - 12px);padding:12px;border:1px solid #e5e7eb;border-radius:8px;margin:6px 0}
+    button{width:100%;border:1px solid #e5e7eb;border-radius:10px;padding:12px;background:#0ea5e9;color:#fff;cursor:pointer;margin-top:12px}
+    h2{text-align:center;margin-bottom:20px}
+    .muted{color:#64748b;text-align:center;display:block;margin-top:10px}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h2>DISC 人格測驗</h2>
+    <input id="username" placeholder="帳號">
+    <input id="password" type="password" placeholder="密碼">
+    <button id="btnLogin">登入</button>
+    <span id="loginMsg" class="muted"></span>
+  </div>
+</div>
+
+<script>
+/* ====== API 基本設定 ====== */
+const API   = 'https://winter-leaf-6bd9.service-hwesen.workers.dev/';  // Proxy URL
+const TOKEN = 'sadfzklj324@#$%';
+
+/* ====== 登入流程 ====== */
+btnLogin.onclick = async ()=>{
+  loginMsg.textContent='登入中...';
+  try{
+    const u=document.getElementById('username').value.trim();
+    const p=document.getElementById('password').value.trim();
+
+    const res = await fetch(`${API}?action=login&token=${encodeURIComponent(TOKEN)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: u, password: p })
+    });
+
+    const j = await res.json();
+    if(j.ok){
+      const user = j.data;
+      sessionStorage.setItem('user', JSON.stringify(user));
+
+      // ✅ 登入成功後，直接導向前端自己的頁面
+      if(user.role === 'admin'){
+        window.location.href = 'query.html';
+      }else{
+        window.location.href = 'index.html';
+      }
+    }else{
+      loginMsg.textContent = '❌ 帳號或密碼錯誤';
+    }
+  }catch(err){
+    loginMsg.textContent = '❌ 連線錯誤，請稍後再試';
+    console.error(err);
+  }
+};
+</script>
+</body>
+</html>
